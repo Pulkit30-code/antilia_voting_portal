@@ -124,7 +124,7 @@ export async function handleElectionSystemAction(
   service: ElectionService = electionService,
 ) {
   if (!hasTrustedMutationOrigin(request)) return noStoreJson({ error: "Request rejected." }, 403);
-  if (!uuid.safeParse(id).success) return noStoreJson({ error: "Invalid election id." }, 400);
+  if (!uuid.safeParse(id).success) return noStoreJson({ error: "Invalid election details" }, 400);
   try {
     return noStoreJson({ election: await service.systemAction(token(request), id, action) });
   } catch (error) {

@@ -99,10 +99,32 @@ function parseElection(value: unknown): Election {
   };
 }
 
-function databaseError(code?: string): ElectionError {
+const READINESS_ERRORS = new Set([
+  "At least one eligible HOD is required",
+  "At least one active FOH candidate is required",
+  "At least one active BOH candidate is required",
+]);
+
+const STATE_ERRORS = new Set([
+  "Election is not in DRAFT status",
+  "Election is not in OPEN status",
+  "Election is not in CLOSED status",
+]);
+
+export function mapElectionDatabaseError(code?: string, message?: string): ElectionError {
   if (code === "23505") return new ElectionError("DUPLICATE_MONTH", "An election already exists for this month and year");
-  if (code === "55000") return new ElectionError("LOCKED", "Election is not editable or cancellable");
-  if (code === "23514" || code === "22003") return new ElectionError("VALIDATION", "Invalid election details");
+  if (code === "55000") {
+    return new ElectionError(
+      "LOCKED",
+      message && STATE_ERRORS.has(message) ? message : "Election is not editable or cancellable",
+    );
+  }
+  if (code === "23514" || code === "22003") {
+    return new ElectionError(
+      "VALIDATION",
+      message && READINESS_ERRORS.has(message) ? message : "Invalid election details",
+    );
+  }
   if (code === "P0002") return new ElectionError("NOT_FOUND", "Election not found");
   if (code === "42501") return new ElectionError("FORBIDDEN", "Administrative authorization failed");
   return new ElectionError("INTERNAL", "Election database operation failed");
@@ -111,7 +133,7 @@ function databaseError(code?: string): ElectionError {
 class SupabaseElectionRepository implements ElectionRepository {
   private async rpc(name: string, parameters: Record<string, unknown>): Promise<unknown> {
     const { data, error } = await createAdminClient().rpc(name, parameters);
-    if (error) throw databaseError(error.code);
+    if (error) throw mapElectionDatabaseError(error.code, error.message);
     return data;
   }
 

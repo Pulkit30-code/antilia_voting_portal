@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { NextRequest } from "next/server";
 
 import { AuthenticationError } from "@/lib/auth/errors";
 import {
   ElectionError,
   ElectionService,
+  mapElectionDatabaseError,
   type Election,
   type ElectionRepository,
 } from "@/lib/elections/service";
+import { handleElectionSystemAction } from "@/lib/elections/http";
 
 const electionId = "40000000-0000-4000-8000-000000000001";
 const baseElection: Election = {
@@ -22,7 +25,7 @@ const baseElection: Election = {
 };
 
 class FakeElectionRepository implements ElectionRepository {
-  records = [baseElection];
+  records = [{ ...baseElection }];
   lastInput: Record<string, unknown> | null = null;
   cancelledId: string | null = null;
   actions: string[] = [];
@@ -59,14 +62,23 @@ class FakeElectionRepository implements ElectionRepository {
     action: "start" | "close" | "reopen" | "reset",
   ) {
     this.actions.push(action);
+    const current = this.records[0];
+    const expected = action === "start" ? "DRAFT" : action === "close" ? "OPEN" : "CLOSED";
+    if (action !== "reset" && current.status !== expected) {
+      throw new ElectionError("LOCKED", `Election is not in ${expected} status`);
+    }
     if (action === "reset") {
       return { ...baseElection, id: `${id}-replacement`, status: "DRAFT" as const };
     }
-    return {
-      ...baseElection,
+    const changed = {
+      ...current,
       id,
       status: action === "close" ? "CLOSED" as const : "OPEN" as const,
+      openedAt: action === "start" ? "2026-09-11T10:00:00.000Z" : current.openedAt,
+      closedAt: action === "close" ? "2026-09-11T11:00:00.000Z" : null,
     };
+    this.records[0] = changed;
+    return changed;
   }
 }
 
@@ -183,6 +195,46 @@ describe("monthly election management service", () => {
     await expect(service.systemAction("opaque-session-token", electionId, "reset"))
       .resolves.toMatchObject({ status: "DRAFT" });
     expect(repository.actions).toEqual(["start", "close", "reopen", "reset"]);
+  });
+
+  it("opens a valid DRAFT election and sets opened_at", async () => {
+    const service = new ElectionService(new FakeElectionRepository(), roleVerifier("SYSTEM"));
+    const election = await service.systemAction("opaque-session-token", electionId, "start");
+    expect(election.status).toBe("OPEN");
+    expect(election.openedAt).toBeTruthy();
+  });
+
+  it("rejects starting an OPEN election again with its exact state error", async () => {
+    const service = new ElectionService(new FakeElectionRepository(), roleVerifier("SYSTEM"));
+    await service.systemAction("opaque-session-token", electionId, "start");
+    await expect(service.systemAction("opaque-session-token", electionId, "start"))
+      .rejects.toMatchObject({ code: "LOCKED", message: "Election is not in DRAFT status" });
+  });
+
+  it("rejects malformed start route ids before calling the service", async () => {
+    const service = new ElectionService(new FakeElectionRepository(), roleVerifier("SYSTEM"));
+    const response = await handleElectionSystemAction(
+      new NextRequest("https://portal.example/api/elections/not-a-uuid/start", {
+        method: "POST",
+        headers: { origin: "https://portal.example", host: "portal.example" },
+      }),
+      "not-a-uuid",
+      "start",
+      service,
+    );
+    await expect(response.json()).resolves.toEqual({ error: "Invalid election details" });
+    expect(response.status).toBe(400);
+  });
+
+  it("maps only explicit readiness, state, and not-found database errors", () => {
+    expect(mapElectionDatabaseError("23514", "At least one active FOH candidate is required"))
+      .toMatchObject({ code: "VALIDATION", message: "At least one active FOH candidate is required" });
+    expect(mapElectionDatabaseError("55000", "Election is not in DRAFT status"))
+      .toMatchObject({ code: "LOCKED", message: "Election is not in DRAFT status" });
+    expect(mapElectionDatabaseError("P0002", "anything"))
+      .toMatchObject({ code: "NOT_FOUND", message: "Election not found" });
+    expect(mapElectionDatabaseError("23514", "Sensitive database detail"))
+      .toMatchObject({ code: "VALIDATION", message: "Invalid election details" });
   });
 
   it("blocks HR from every SYSTEM election action", async () => {
