@@ -1,0 +1,21 @@
+# Environment files and credentials
+.env
+.env.*
+!.env.example
+
+# Supabase CLI link/cache state
+supabase/.temp/
+supabase/.branches/
+
+# Hosted schema inspection output
+supabase/pre_push_schema.sql
+
+# Next.js / Node.js
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# macOS
+.DS_Store
