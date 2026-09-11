@@ -226,4 +226,45 @@ describe("tie-break backend", () => {
     expect(new TieBreakError("INVALID_CANDIDATE", "Invalid candidate selection").message)
       .toBe("Invalid candidate selection");
   });
+
+  it("keeps SYSTEM reads service-only while allowing private session checks", () => {
+    const migration = readFileSync(path.join(
+      process.cwd(),
+      "supabase/migrations/20260911094449_fix_tie_break_admin_rpc_permissions.sql",
+    ), "utf8");
+    for (const functionName of [
+      "antilia_tie_breaks_list",
+      "antilia_tie_breaks_get",
+      "antilia_tie_breaks_results",
+    ]) {
+      expect(migration).toContain(
+        `alter function public.${functionName}(bytea, uuid) security definer`,
+      );
+      expect(migration).toContain(
+        `revoke execute on function public.${functionName}(bytea, uuid)`,
+      );
+      expect(migration).toContain(
+        `grant execute on function public.${functionName}(bytea, uuid)`,
+      );
+    }
+    expect(migration).toContain("from public, anon, authenticated");
+    expect(migration).toContain("to service_role");
+  });
+
+  it("isolates optional tie-break read failures from the SYSTEM dashboard", () => {
+    const systemPanel = readFileSync(path.join(
+      process.cwd(), "components/system-control-panel.tsx",
+    ), "utf8");
+    const tieBreakPanel = readFileSync(path.join(
+      process.cwd(), "components/tie-break-panel.tsx",
+    ), "utf8");
+    expect(systemPanel).toContain('fetch("/api/elections"');
+    expect(systemPanel).not.toContain("/api/voting/election");
+    expect(tieBreakPanel).toContain("if (tieResponse.status === 401)");
+    expect(tieBreakPanel).not.toContain(
+      "tieResponse.status === 401 || tieResponse.status === 403",
+    );
+    expect(tieBreakPanel).toContain("setLoading(false)");
+    expect(tieBreakPanel).toContain("partialFailure");
+  });
 });

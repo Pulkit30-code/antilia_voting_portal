@@ -146,6 +146,7 @@ export function TieBreakPanel({ electionId, electionName, electionStatus, role }
   const [tiedCategories, setTiedCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [detailError, setDetailError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [acting, setActing] = useState(false);
@@ -155,9 +156,10 @@ export function TieBreakPanel({ electionId, electionName, electionStatus, role }
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
+    setDetailError("");
     try {
       const tieResponse = await fetch(`/api/tie-breaks?electionId=${encodeURIComponent(electionId)}`, { cache: "no-store", credentials: "same-origin" });
-      if (tieResponse.status === 401 || tieResponse.status === 403) {
+      if (tieResponse.status === 401) {
         router.replace(role === "SYSTEM" ? "/system/login" : "/hr/login");
         return;
       }
@@ -165,14 +167,23 @@ export function TieBreakPanel({ electionId, electionName, electionStatus, role }
       const tieBody = await tieResponse.json() as { tieBreaks?: TieBreak[] };
       if (!Array.isArray(tieBody.tieBreaks)) throw new Error("The tie-break list could not be read.");
 
-      const detailResponses = await Promise.all(tieBody.tieBreaks.map((item) => fetch(`/api/tie-breaks/${item.id}`, { cache: "no-store", credentials: "same-origin" })));
-      const details = await Promise.all(detailResponses.map(async (response, index) => {
-        if (!response.ok) throw new Error(await responseError(response, "Unable to load tie-break details."));
-        const body = await response.json() as { tieBreak?: TieBreak };
-        if (!body.tieBreak) throw new Error("Tie-break details could not be read.");
-        return { ...body.tieBreak, voteCount: tieBody.tieBreaks?.[index]?.voteCount };
+      let partialFailure = false;
+      const details = await Promise.all(tieBody.tieBreaks.map(async (item) => {
+        try {
+          const response = await fetch(`/api/tie-breaks/${item.id}`, { cache: "no-store", credentials: "same-origin" });
+          if (!response.ok) throw new Error(await responseError(response, "Unable to load tie-break details."));
+          const body = await response.json() as { tieBreak?: TieBreak };
+          if (!body.tieBreak) throw new Error("Tie-break details could not be read.");
+          return { ...body.tieBreak, voteCount: item.voteCount };
+        } catch {
+          partialFailure = true;
+          return item;
+        }
       }));
       setTieBreaks(details);
+      if (partialFailure) {
+        setDetailError("Some tie-break result details are temporarily unavailable.");
+      }
 
       if (electionStatus !== "DRAFT") {
         const [resultsResponse, turnoutResponse] = await Promise.all([
@@ -248,6 +259,7 @@ export function TieBreakPanel({ electionId, electionName, electionStatus, role }
       {loading ? <div aria-label="Loading tie-breaks" aria-busy="true" className="grid gap-4 xl:grid-cols-2"><Skeleton className="h-80" /><Skeleton className="h-80" /></div>
         : error ? <Alert tone="error" title="Tie-breaks unavailable"><span>{error}</span><button type="button" className="mt-2 block font-semibold underline underline-offset-4" onClick={() => setReloadKey((value) => value + 1)}>Try again</button></Alert>
           : <>
+            {detailError ? <Alert tone="error" title="Tie-break details unavailable">{detailError}</Alert> : null}
             {role === "SYSTEM" && electionStatus === "CLOSED" && creatableCategories.length > 0 ? (
               <div className="flex flex-col gap-4 rounded-2xl border border-[#b99a5f]/25 bg-[#b99a5f]/[0.07] p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
                 <div className="flex gap-3"><span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#b99a5f]/15 text-[#d5b97b]"><AlertTriangle aria-hidden="true" className="size-4" /></span><div><p className="text-sm font-semibold text-[#eadfc9]">First-place tie detected</p><p className="mt-1 text-xs leading-5 text-[#9c927f]">Create a separate tie-break ballot. Original election votes and results will remain unchanged.</p></div></div>
