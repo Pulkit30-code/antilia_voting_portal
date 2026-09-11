@@ -84,7 +84,27 @@ describe("authentication HTTP boundary", () => {
     expect(cookie).toContain("HttpOnly");
     expect(cookie).toContain("SameSite=lax");
     expect(cookie).toContain("Path=/");
+    expect(cookie).toContain("Max-Age=28800");
+    expect(cookie).not.toContain("Domain=");
     expect(cookie).not.toMatch(/hr|system/i);
+  });
+
+  it("marks the admin session cookie Secure in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      const response = await handleLogin(
+        request("/api/auth/system/login", {
+          method: "POST",
+          origin: "https://portal.example.test",
+          body: { passcode: "correct passcode" },
+        }),
+        "SYSTEM",
+        serviceStub(),
+      );
+      expect(response.headers.get("set-cookie")).toContain("Secure");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("never returns a password hash or Supabase secret from login", async () => {

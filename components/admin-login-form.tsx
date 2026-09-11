@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowRight, LoaderCircle, LockKeyhole } from "lucide-react";
 
 type AdminLoginFormProps = {
@@ -11,7 +10,6 @@ type AdminLoginFormProps = {
 };
 
 export function AdminLoginForm({ role, redirectTo, theme = "light" }: AdminLoginFormProps) {
-  const router = useRouter();
   const [passcode, setPasscode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -24,6 +22,8 @@ export function AdminLoginForm({ role, redirectTo, theme = "light" }: AdminLogin
     try {
       const response = await fetch(`/api/auth/${role.toLowerCase()}/login`, {
         method: "POST",
+        cache: "no-store",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ passcode }),
       });
@@ -39,9 +39,21 @@ export function AdminLoginForm({ role, redirectTo, theme = "light" }: AdminLogin
 
       setPasscode("");
       if (redirectTo) {
-        router.replace(redirectTo);
+        const sessionResponse = await fetch("/api/auth/session", {
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+        const session = (await sessionResponse.json().catch(() => null)) as
+          | { authenticated?: boolean; role?: "HR" | "SYSTEM" }
+          | null;
+        if (!sessionResponse.ok || !session?.authenticated || session.role !== role) {
+          setError("Unable to establish a secure session. Please try again.");
+          return;
+        }
+
+        window.location.replace(redirectTo);
       } else {
-        router.refresh();
+        window.location.reload();
       }
     } catch {
       setError("Unable to sign in. Please try again.");

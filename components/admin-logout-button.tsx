@@ -1,11 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { LoaderCircle, LogOut } from "lucide-react";
 
 export function AdminLogoutButton({ redirectTo, theme = "light" }: { redirectTo?: string; theme?: "dark" | "light" }) {
-  const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -13,15 +11,19 @@ export function AdminLogoutButton({ redirectTo, theme = "light" }: { redirectTo?
     setError(null);
     setSubmitting(true);
     try {
-      const response = await fetch("/api/auth/logout", { method: "POST" });
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+        cache: "no-store",
+        credentials: "same-origin",
+      });
       if (!response.ok) {
         setError("Could not sign out. Please try again.");
         return;
       }
       if (redirectTo) {
-        router.replace(redirectTo);
+        window.location.replace(redirectTo);
       } else {
-        router.refresh();
+        window.location.reload();
       }
     } catch {
       setError("Could not sign out. Please try again.");
