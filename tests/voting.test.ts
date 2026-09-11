@@ -29,6 +29,7 @@ const bohId = "50000000-0000-4000-8000-000000000002";
 
 class FakeVotingRepository implements VotingRepository {
   openElection = election;
+  registeredIdentity: HodVerificationInput | null = null;
   verificationStatus: "VERIFIED" | "ELECTION_NOT_OPEN" | "HOD_NOT_VERIFIED" | "ALREADY_VOTED" = "VERIFIED";
   rateAllowed = true;
   scopes: string[] = [];
@@ -52,10 +53,18 @@ class FakeVotingRepository implements VotingRepository {
   async verifyHod(input: HodVerificationInput, tokenHash: Uint8Array) {
     this.verificationInput = input;
     this.verificationTokenHash = tokenHash;
+    const normalized = (value: string) => value.trim().toLocaleLowerCase();
+    const normalizedMobile = (value: string) => value.replace(/\D/g, "");
+    const identityMatches = !this.registeredIdentity || (
+      normalized(input.name) === normalized(this.registeredIdentity.name)
+      && normalizedMobile(input.mobileNumber) === normalizedMobile(this.registeredIdentity.mobileNumber)
+      && normalized(input.department) === normalized(this.registeredIdentity.department)
+    );
+    const status = identityMatches ? this.verificationStatus : "HOD_NOT_VERIFIED";
     return {
-      verificationStatus: this.verificationStatus,
-      election: this.verificationStatus === "VERIFIED" ? election : null,
-      expiresAt: this.verificationStatus === "VERIFIED" ? "2026-09-10T10:10:00.000Z" : null,
+      verificationStatus: status,
+      election: status === "VERIFIED" ? election : null,
+      expiresAt: status === "VERIFIED" ? "2026-09-10T10:10:00.000Z" : null,
     };
   }
   async submitBallot(...parameters: Parameters<VotingRepository["submitBallot"]>) {
@@ -105,6 +114,29 @@ describe("public HOD voting service", () => {
       createHash("sha256").update(rawToken).digest(),
     );
     expect(Buffer.from(repository.verificationTokenHash!).toString()).not.toContain(rawToken);
+  });
+
+  it("accepts the registered department with safe casing/space normalization and rejects a wrong department", async () => {
+    const repository = new FakeVotingRepository();
+    repository.registeredIdentity = {
+      name: "Test HOD",
+      mobileNumber: "+919876543210",
+      department: "Finance",
+    };
+    const service = new VotingService(repository, () => "opaque-voter-token");
+
+    await expect(service.verifyHod({
+      name: "  test hod  ",
+      mobileNumber: "+91 98765 43210",
+      department: "  fINANce  ",
+    }, ipHash)).resolves.toMatchObject({ election });
+    expect(repository.verificationInput?.department).toBe("fINANce");
+
+    await expect(service.verifyHod({
+      name: "Test HOD",
+      mobileNumber: "+919876543210",
+      department: "Unrelated Department",
+    }, ipHash)).rejects.toMatchObject({ code: "HOD_NOT_VERIFIED" });
   });
 
   it.each([
@@ -174,8 +206,18 @@ describe("public HOD voting service", () => {
     expect(sql).toContain("where h.is_active");
     expect(sql).toContain("and eh.is_active");
     expect(sql).toContain("and eh.is_approved");
+    expect(sql).toContain("lower(btrim(eh.department_snapshot)) = lower(btrim(p_department))");
     expect(sql).not.toMatch(/grant execute[\s\S]*to anon/i);
     expect(sql).not.toMatch(/grant (select|insert|update|delete)[\s\S]*to anon/i);
+  });
+
+  it("renders department as free text without publishing registered department options", () => {
+    const source = readFileSync(path.join(process.cwd(), "components/public-voting-portal.tsx"), "utf8");
+    expect(source).toContain('label="Department"');
+    expect(source).toContain('placeholder="Enter your registered department"');
+    expect(source).not.toContain('<Select\n                    id="department"');
+    expect(source).not.toContain("const departments =");
+    expect(source).not.toContain("otherDepartment");
   });
 });
 

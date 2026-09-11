@@ -15,7 +15,7 @@ import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/form-field";
+import { Input } from "@/components/ui/form-field";
 import { Modal } from "@/components/ui/modal";
 import { Alert, Badge, Card, Skeleton, Toast } from "@/components/ui/surfaces";
 
@@ -51,36 +51,15 @@ type FormValues = {
   department: string;
   mobileNumber: string;
   name: string;
-  otherDepartment: string;
 };
 
 type FormErrors = Partial<Record<keyof FormValues, string>>;
 type PageState = "checking" | "unavailable" | "tie-select" | "verify" | "candidates" | "already-voted" | "success" | "error";
 
-const departments = [
-  "Administration",
-  "Butler Services",
-  "Engineering",
-  "Finance",
-  "Food & Beverage",
-  "Front Office",
-  "Guest Relations",
-  "Housekeeping",
-  "Human Resources",
-  "Information Technology",
-  "Kitchen",
-  "Operations",
-  "Procurement",
-  "Security",
-  "Stewarding",
-  "Other",
-] as const;
-
 const initialForm: FormValues = {
   department: "",
   mobileNumber: "",
   name: "",
-  otherDepartment: "",
 };
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -216,8 +195,7 @@ export function PublicVotingPortal() {
     if (!form.name.trim()) nextErrors.name = "Enter your full name.";
     const digits = form.mobileNumber.replace(/\D/g, "");
     if (digits.length < 8 || digits.length > 15) nextErrors.mobileNumber = "Enter a valid mobile number.";
-    if (!form.department) nextErrors.department = "Select your department.";
-    if (form.department === "Other" && !form.otherDepartment.trim()) nextErrors.otherDepartment = "Enter your department.";
+    if (!form.department.trim()) nextErrors.department = "Enter your registered department.";
     return nextErrors;
   }
 
@@ -260,11 +238,10 @@ export function PublicVotingPortal() {
     setIsVerifying(true);
     setPageError("");
     try {
-      const department = form.department === "Other" ? form.otherDepartment.trim() : form.department;
       const response = await fetch(tieBreak ? `/api/voting/tie-breaks/${tieBreak.id}/verify` : "/api/voting/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: form.name.trim(), mobileNumber: form.mobileNumber.trim(), department }),
+        body: JSON.stringify({ name: form.name.trim(), mobileNumber: form.mobileNumber.trim(), department: form.department.trim() }),
       });
       await readJson<{ verified: true; expiresAt: string }>(response);
       setPageState("candidates");
@@ -471,27 +448,15 @@ export function PublicVotingPortal() {
                     error={errors.mobileNumber}
                     onChange={(event) => setForm((current) => ({ ...current, mobileNumber: event.target.value }))}
                   />
-                  <Select
+                  <Input
                     id="department"
                     label="Department"
+                    placeholder="Enter your registered department"
+                    maxLength={160}
                     value={form.department}
                     error={errors.department}
                     onChange={(event) => setForm((current) => ({ ...current, department: event.target.value }))}
-                  >
-                    <option value="" disabled>Select your department</option>
-                    {departments.map((department) => <option key={department} value={department}>{department}</option>)}
-                  </Select>
-                  {form.department === "Other" ? (
-                    <Input
-                      id="otherDepartment"
-                      label="Department name"
-                      placeholder="Enter your registered department"
-                      maxLength={160}
-                      value={form.otherDepartment}
-                      error={errors.otherDepartment}
-                      onChange={(event) => setForm((current) => ({ ...current, otherDepartment: event.target.value }))}
-                    />
-                  ) : null}
+                  />
                   <Button type="submit" fullWidth disabled={isVerifying}>
                     {isVerifying ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <ShieldCheck aria-hidden="true" className="size-4" />}
                     {isVerifying ? "Verifying…" : "Verify and continue"}
